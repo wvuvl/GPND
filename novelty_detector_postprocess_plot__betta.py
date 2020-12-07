@@ -52,8 +52,13 @@ def main(folding_id, inliner_classes, ic, total_classes, mul, folds=5, cfg=None)
     def compute_threshold_coeffs(y_scores_components, y_true):
         y_scores_components = np.asarray(y_scores_components, dtype=np.float32)
 
-        def evaluate(threshold, alpha):
-            coeff = np.asarray([[1, 0, alpha, 1]], dtype=np.float32)
+        def evaluate(threshold, beta, alpha):
+            coeff = np.asarray([[1.0, beta, alpha, 1]], dtype=np.float32)
+            # coeff_a = np.asarray([[1, 1, alpha, 1]], dtype=np.float32)
+            # coeff_b = np.asarray([[1, -1, alpha, 1]], dtype=np.float32)
+            # mask = y_scores_components[:, 2:3] > beta
+            #
+            # coeff = np.where(mask, coeff_a, coeff_b)
 
             y_scores = (y_scores_components * coeff).mean(axis=1)
 
@@ -66,27 +71,52 @@ def main(folding_id, inliner_classes, ic, total_classes, mul, folds=5, cfg=None)
             return get_f1(true_positive, false_positive, false_negative)
 
         def func(x):
-            alpha = x
+            threshold, beta, alpha = x
+            return evaluate(threshold, beta, alpha)
 
-            # Find threshold
-            def eval(th):
-                return evaluate(th, alpha)
-
-            best_th, best_f1 = find_maximum(eval, -200, 200, 1e-2)
-
-            return best_f1
-
-        cmax, vmax = find_maximum_mv(func, [0.0], [1.0], xtoll=0.001, ftoll=0.001, verbose=True,
-                                     n=8, max_iter=6)
-
-        alpha = cmax
-
-        # Find threshold
+        # Find initial threshold guess
         def eval(th):
-            return evaluate(th, alpha)
+            return evaluate(th, 1.0, 0.2)
+        best_th, best_f1 = find_maximum(eval, -1000, 1000, 1e-2)
+        logger.info("Initial e: %f best f1: %f" % (best_th, best_f1))
 
-        beta = 0
-        threshold, best_f1 = find_maximum(eval, -1000, 1000, 1e-3)
+        x = []
+        y = []
+
+        plt.figure(num=None, figsize=(8, 6), dpi=180, facecolor='w', edgecolor='k')
+
+        def calc_for_beta(beta):
+            beta /= 30.0
+
+            def func_beta(x):
+                threshold, alpha = x
+                return evaluate(threshold, beta, alpha)
+
+            cmax, vmax = find_maximum_mv(func_beta, [-20.0, 0.0], [200.0, 10.0], xtoll=0.001, ftoll=0.001, verbose=True, n=100, max_iter=3)
+
+            threshold, alpha = cmax
+
+            best_f1 = evaluate(threshold, beta, alpha)
+            return beta, best_f1
+
+        current_module = sys.modules[__name__]
+        current_module.fff = calc_for_beta
+
+        with mp.Pool(None, initializer=worker_init, initargs=(calc_for_beta, )) as p:
+            results = p.map(worker, range(-100, 100))
+
+        x, y = list(zip(*results))
+
+        plt.xlabel('beta')
+        plt.ylabel('F1')
+        plt.title('F1 vs Beta')
+        plt.plot(x, y)
+        plt.grid(True)
+        plt.savefig("betta.png")
+        plt.clf()
+        plt.cla()
+        plt.close()
+        beta = -1
 
         logger.info("Best e: %f Best beta: %f Best a: %f best f1: %f" % (threshold, beta, alpha, best_f1))
         return threshold, beta, alpha
@@ -94,7 +124,13 @@ def main(folding_id, inliner_classes, ic, total_classes, mul, folds=5, cfg=None)
     def test(y_scores_components, y_true, percentage, threshold, beta, alpha):
         y_scores_components = np.asarray(y_scores_components, dtype=np.float32)
 
-        coeff = np.asarray([[1, 0, alpha, 1]], dtype=np.float32)
+        coeff = np.asarray([[1.0, beta, alpha, 1]], dtype=np.float32)
+        # coeff_a = np.asarray([[1, 1, alpha, 1]], dtype=np.float32)
+        # coeff_b = np.asarray([[0, 0, alpha, 1]], dtype=np.float32)
+        # mask = y_scores_components[:, 2:3] > beta
+        #
+        # coeff = np.where(mask, coeff_a, coeff_b)
+
         y_scores = (y_scores_components * coeff).mean(axis=1)
 
         return evaluate(logger, percentage, inliner_classes, y_scores, threshold, y_true)

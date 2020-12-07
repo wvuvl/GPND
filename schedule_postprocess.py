@@ -27,7 +27,7 @@ settings = []
 classes_count = 10
 
 for fold in range(5 if full_run else 1):
-    for i in [3]:  # range(classes_count):
+    for i in range(classes_count):
         settings.append(dict(fold=fold, digit=i))
 
 cfg = get_cfg_defaults()
@@ -48,7 +48,7 @@ def f(setting):
 
 gpu_count = min(utils.multiprocessing.get_gpu_count(), 6)
 
-# results = utils.multiprocessing.map(f, gpu_count, settings)
-results = f(settings[0])
+results = utils.multiprocessing.map(f, gpu_count, settings)
+# results = f(settings[0])
 
 save_results(results, os.path.join(cfg.OUTPUT_FOLDER, cfg.RESULTS_NAME))

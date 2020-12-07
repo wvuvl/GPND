@@ -32,6 +32,7 @@ from utils.threshold_search import find_maximum_mv, find_maximum_mv_it
 import os
 import multiprocessing as mp
 import sys
+import open3d as o3d
 
 
 _func = None
@@ -44,6 +45,34 @@ def worker_init(func):
 
 def worker(x):
     return _func(x)
+
+
+def make_frame(M):
+    points2 = [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+    ]
+    lines2 = [
+        [0, 1],
+        [0, 2],
+        [0, 3],
+    ]
+    colors2 = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+
+    points2 = np.asarray(points2, dtype=np.float32)
+
+    points2 = np.concatenate([points2, np.ones([points2.shape[0], 1])], axis=1)
+
+    points2 = np.matmul(M, points2.T).T[:, :3]
+
+    frame = o3d.geometry.LineSet(
+        points=o3d.utility.Vector3dVector(points2),
+        lines=o3d.utility.Vector2iVector(lines2),
+    )
+    frame.colors = o3d.utility.Vector3dVector(colors2)
+    return [frame]
 
 
 def main(folding_id, inliner_classes, ic, total_classes, mul, folds=5, cfg=None):
@@ -90,13 +119,22 @@ def main(folding_id, inliner_classes, ic, total_classes, mul, folds=5, cfg=None)
 
         coeff = np.asarray([[1.0, 0.0, alpha, 1]], dtype=np.float32)
         y_scores = (y_scores_components * coeff).mean(axis=1)
+        error = y_scores_components[:, 2] * alpha + y_scores_components[:, 3]
+
+        coordinates = [p for p in zip(error, y_scores_components[:, 0], y_scores_components[:, 1])]
+        colors = [(1.0, 0.0, 0.0) if p else (0.0, 0.0, 1.0) for p in y_true]
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(coordinates)
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        o3d.visualization.draw_geometries([pcd] + make_frame(np.eye(4) * 10.0))
 
         plt.xlim(-15.0, 1.0)
         plt.figure(num=None, figsize=(8, 8), dpi=180, facecolor='w', edgecolor='k')
         plt.scatter(y_scores, y_scores_components[:, 1], marker='o', c=y_true, alpha=.5, s=1)
         plt.xlabel('P(z)+P(error)')
         plt.ylabel('|J^-1|')
-        plt.title('Jacobian vs score')
         plt.grid(True)
         plt.savefig("scatter_perrorpz_pjacobbian.png")
         plt.clf()
@@ -105,10 +143,20 @@ def main(folding_id, inliner_classes, ic, total_classes, mul, folds=5, cfg=None)
 
         plt.xlim(-15.0, 1.0)
         plt.figure(num=None, figsize=(8, 8), dpi=180, facecolor='w', edgecolor='k')
-        plt.scatter(y_scores_components[:, 2] * alpha + y_scores_components[:, 3], y_scores_components[:, 0], marker='o', c=y_true, alpha=.5, s=1)
+        plt.scatter(error, y_scores_components[:, 1], marker='o', c=y_true, alpha=.5, s=1)
+        plt.xlabel('P(z)+P(error)')
+        plt.ylabel('|J^-1|')
+        plt.grid(True)
+        plt.savefig("scatter_perror_pjacobbian.png")
+        plt.clf()
+        plt.cla()
+        plt.close()
+
+        plt.xlim(-15.0, 1.0)
+        plt.figure(num=None, figsize=(8, 8), dpi=180, facecolor='w', edgecolor='k')
+        plt.scatter(error, y_scores_components[:, 0], marker='o', c=y_true, alpha=.5, s=1)
         plt.xlabel('P(error)')
         plt.ylabel('|J^-1|')
-        plt.title('Jacobian vs score')
         plt.grid(True)
         plt.savefig("scatter_error_pz.png")
         plt.clf()
@@ -120,9 +168,19 @@ def main(folding_id, inliner_classes, ic, total_classes, mul, folds=5, cfg=None)
         plt.scatter(y_scores_components[:, 0], y_scores_components[:, 1], marker='o', c=y_true, alpha=.5, s=1)
         plt.xlabel('P(z)')
         plt.ylabel('|J^-1|')
-        plt.title('Jacobian vs score')
         plt.grid(True)
         plt.savefig("scatter_pz_pjacob.png")
+        plt.clf()
+        plt.cla()
+        plt.close()
+
+        plt.xlim(-15.0, 1.0)
+        plt.figure(num=None, figsize=(8, 8), dpi=180, facecolor='w', edgecolor='k')
+        plt.scatter(y_scores_components[:, 1], y_scores_components[:, 0], marker='o', c=y_true, alpha=.5, s=1)
+        plt.xlabel('P(z)')
+        plt.ylabel('|J^-1|')
+        plt.grid(True)
+        plt.savefig("scatter_pjacob_pz.png")
         plt.clf()
         plt.cla()
         plt.close()
